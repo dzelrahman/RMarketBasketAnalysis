@@ -1,0 +1,323 @@
+---
+title: "recom_system"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Executive Summary
+
+Di tengah merebaknya e-commerce yang saat ini menjadi bagian dari kehidupan masyarakat, maka tak diragukan lagi akan banyak sekali data-data yang berhasil terkumpul dari transaksi yang dilakukan. Data-data yang banyak terkumpul ini tentulah tak mungkin dibiarkan saja tanpa digali insight menarik untuk kepentingan bisnis dan strategi penjualan. Tugas dari seorang data analyst adalah memastikan data yang banyak tersebut tidak sia-sia, dan berusaha menggali insight-insight dengan cara melakukan analisa. Analisa dapat dilakukan dengan berbagai cara, yaitu dengan visualisasi ataupun melakukan predictive analytics, dan masih banyak cara lainnya. Pada studi kasus kali ini kita akan menggunakan data retail untuk mengetahui perilaku konsumen dan apa saja keterkaitan antar barang-barang yang mereka beli. Kita juga akan mengetahui di jam atau hari apa saja kustomer lebih aktif di dalam melakukan transaksi. 
+
+Tujuan dari studi kasus ini adalah untuk mengetahui karakteristik dari data retail yang kita miliki, yaitu mengetahui pukul berapa transaksi paling aktif dilakukan, juga mengetahui negara mana yang memiliki transaksi paling besar. Untuk melakukan analisa, kita menggunakan data publik online retail dan software R programming.
+
+Untuk mengetahui perilaku konsumen, kita menggunakan analisa market basket, dimana kita akan berusaha menemukan mana produk-produk yang memiliki keterkaitan atau yang sering dibeli bersama-sama.
+
+Ada beberapa pertanyaan pada studi kasus ini yang akan kita dalami:
+
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(lubridate)
+library(plyr)
+```
+
+```{r}
+df <- read_xlsx("Online_retail_Data.xlsx")
+
+str(df)
+
+glimpse(df)
+
+summary(df)
+
+```
+
+```{r}
+head(df)
+```
+
+InvoiceNo - Unique number assigned to a shipment for billing purpose
+
+StockCode - Helps track the item for inventory
+
+Description - Product name
+
+Quantity - Amount purchased
+
+InvoiceDate - Date and time of purchase
+
+UnitPrice - Cost of product
+
+CustomerID - Unique id for customer
+
+Country - Contry of purchase
+
+
+# Data Cleaning
+
+```{r}
+df %>% summarise(count = sum(is.na(CustomerID)))
+```
+
+
+```{r}
+df_clean <- df %>% filter(CustomerID != is.na(CustomerID) | Description != is.na(Description))
+
+df_clean %>% summarise(count = sum(is.na(CustomerID)))
+
+df_clean_cust <- df_clean %>% filter(CustomerID != is.na(CustomerID))
+
+df_clean_cust %>% summarise(count = sum(is.na(Description)))
+
+df_clean_all <- df_clean_cust
+```
+
+```{r}
+df_clean_all
+```
+
+
+# Feature Engineering
+
+```{r}
+#Buat feature baru yang berguna untuk analisa
+
+## Total Cost of purchase
+
+df_clean_fe <- df_clean_all %>% mutate(total_cost = Quantity * UnitPrice)
+
+## Pembelian yang dilakukan pada setiap segmen waktu
+
+str(df_clean_fe)
+
+```
+
+```{r}
+hour(df_clean_fe$InvoiceDate)
+
+df_fe <- df_clean_fe %>% mutate(hour = hour(InvoiceDate), day_of_week = day(InvoiceDate), month = month(InvoiceDate), year = year(InvoiceDate))
+
+df_fe
+```
+
+# Insights
+
+```{r}
+# Penjualan produk dikelompokkan berdasarkan jam dalam sehari
+
+hour_count <- df_fe %>% group_by(hour) %>% summarise(count = n())
+
+hour_count
+
+# plotting bar chart
+plot(hour_count)
+```
+
+```{r}
+# Penjualan produk dikelompokkan berdasarkan bulan
+
+month_count <- df_fe %>% group_by(month) %>% summarise(count = n())
+
+plot(month_count)
+```
+
+```{r}
+# Jumlah penjualan dikelompokkan berdasarkan negara
+
+country_count <- df_fe %>% group_by(Country) %>% summarise(count = n())
+
+country_count %>% ggplot(aes(x=Country, y=count)) + geom_point()
+```
+
+```{r}
+# Produk dengan penjualan tertinggi berdasarkan rata-rata jumlah penjualan
+
+desc_quant <- df_fe %>% group_by(Description) %>% summarise(Quantity = mean(Quantity)) %>% arrange(desc(Quantity))
+
+desc_quant
+```
+
+```{r}
+# Produk dengan pendapatan tertinggi
+
+desc_cost <- df_fe %>% group_by(Description) %>% summarise(total_cost = mean(total_cost)) %>% arrange(desc(total_cost))
+
+desc_cost
+```
+
+# Recommender System (Market Basket Analysis)
+
+```{r}
+orders <- df_fe %>% select(InvoiceNo,StockCode)
+
+orders_matrix <- as.matrix(orders)   
+
+str(orders_matrix)
+```
+
+# Membuat Fungsi/Program untuk asosiasi
+
+```{r}
+install.packages("arules")
+install.packages("arulesViz")
+
+library(arules)
+library(arulesViz)
+
+library(datasets)
+
+data("Groceries")
+
+Groceries
+```
+
+```{r}
+df_fe
+```
+
+
+```{r}
+df_date <- df_fe %>% mutate(Date = date(InvoiceDate))
+
+df_date$InvoiceNo <- as.numeric(df_date$InvoiceNo)
+```
+
+```{r}
+library(plyr)
+
+transaction_data <- ddply(df_date, c("InvoiceNo","Date"), function(df1)paste(df1$Description, collapse=","))
+
+transaction_data
+```
+
+```{r}
+trans_data_model <- transaction_data
+
+trans_data_model$InvoiceNo <- NULL
+trans_data_model$Date <- NULL
+```
+
+```{r}
+trans_data_model <- transaction_data %>% select(V1)
+
+colnames(trans_data_model) <- c("items")
+
+trans_data_model
+
+write.csv(trans_data_model,"trans_data_model.csv", quote = FALSE, row.names = FALSE)
+```
+
+
+```{r}
+trans <- read.transactions("trans_data_model.csv",format = "basket", sep=",")
+```
+
+```{r}
+trans
+
+summary(trans)
+```
+
+```{r}
+# Buat plot item frequency 20 Besar
+
+if (!require("RColorBrewer")) {
+  install.packages("RColorBrewer")
+  library(RColorBrewer)
+}
+
+itemFrequencyPlot(trans, topN=20, type="absolute", col=brewer.pal(8, "Pastel2"), main="Plot Frekuensi Absolut Pembelian Barang")
+
+itemFrequencyPlot(trans, topN=20, type="relative", col=brewer.pal(8, "Pastel2"), main="Plot Frekuensi Relatif Pembelian Barang")
+
+
+```
+
+# Menggunakan Algoritma APRIORI
+
+```{r}
+# Min support as 0.001, confidence as 0.8
+
+association_rules <- apriori(trans, parameter = list(supp=0.001, conf=0.8, maxlen=10))
+
+summary(association_rules)
+```
+
+```{r}
+inspect(association_rules[1:20])
+```
+
+```{r}
+# Membatasi jumlah dan ukuran "rules"
+
+shorter_ass_rules <- apriori(trans, parameter = list(supp=0.001, conf=0.8, maxlen=3))
+
+# Menghilangkan rules yang berulang
+
+subset_rules <- which(colSums(is.subset(association_rules,association_rules)) > 1)
+
+length(subset_rules)
+
+subset_ass_rules <- association_rules[-subset_rules]
+                                      
+```
+
+# Mencari rules yang terkait dengan beberapa barang tertentu
+
+```{r}
+# Apa yang dibeli kustomer sebelum membeli metal
+
+metal_ass_rules <- apriori(trans, parameter = list(supp=0.001,conf=0.8),appearance = list(default="lhs",rhs="METAL"))
+
+inspect(head(metal_ass_rules))
+```
+
+```{r}
+# Kustomer yang membeli metal juga membeli...
+
+metal_ass_rules_2 <- apriori(trans, parameter = list(supp=0.001,conf=0.8),appearance = list(lhs="METAL",default="rhs"))
+
+inspect(head(metal_ass_rules_2))
+```
+
+```{r}
+sub_rules <- association_rules[quality(association_rules)$confidence>0.4]
+
+top10_sub_rules <- head(sub_rules, n=10, by="confidence")
+
+plot(top10_sub_rules, method = "graph", engine = "htmlwidget")
+
+plot(top10_sub_rules, method = "graph", interactive = TRUE, shading = NA)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
